@@ -1,0 +1,48 @@
+
+self.log.info("Connect nodes 1 and 2")
+self.connect_nodes(1, 2)
+
+self.log.info("Set parameters for node 1")
+self.tip = int(self.nodes[1].getbestblockhash(), 16)
+self.block_time = self.nodes[1].getblock(self.nodes[1].getbestblockhash())['time'] + 1
+
+height = self.nodes[1].getblockcount()
+
+self.log.info("Create block in node 1")
+block = create_block(self.tip, create_coinbase(height+1), self.block_time)
+block.solve()
+
+self.log.info("wrap block in message")
+block_message = msg_block(block)
+
+self.log.info("Propagate message through the network")
+peer_messaging.send_message(block_message)
+self.tip = block.sha256
+blocks.append(self.tip)
+
+self.log.info("Wait for node2 to reach current tip (height 2) using RPC")
+self.nodes[2].waitforblockheight(2)
+
+self.log.info("Wait for node2 to receive all the blocks from node1")
+self.sync_all()
+
+self.log.info("Test that node2 propagates all the blocks to us")
+
+self.log.info("Add P2P connection to node2")
+peer_receiving = self.nodes[2].add_p2p_connection(BaseNode())
+
+getdata_request = msg_getdata()
+for block in blocks:
+    getdata_request.inv.append(CInv(MSG_BLOCK, block))
+
+peer_receiving.send_message(getdata_request)
+
+# wait_until() will loop until a predicate condition is met. Use it to test properties of the
+# P2PInterface objects.
+peer_receiving.wait_until(lambda: sorted(blocks) == sorted(list(peer_receiving.block_receive_map.keys())), timeout=5)
+
+self.log.info("Get all block keys (hashes}")
+node2_blocks = peer_receiving.block_receive_map.keys()
+
+self.log.info("Check if the node 2 has received the recently created block")
+assert_equal(self.tip in node2_blocks, True)
